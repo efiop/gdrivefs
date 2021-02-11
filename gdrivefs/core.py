@@ -44,7 +44,7 @@ class GoogleDriveFileSystem(AbstractFileSystem):
 
     def __init__(self, root_file_id=None, token="browser",
                  access="full_control", spaces='drive', creds=None,
-                 **kwargs):
+                 service_account=False, tokens_file=None, **kwargs):
         """
         Access to dgrive as a file-system
 
@@ -69,6 +69,10 @@ class GoogleDriveFileSystem(AbstractFileSystem):
             don't want the user to be prompted to authenticate.
             The files need to be shared with the service account email address, that can be found
             in the json file.
+        :param tokens_file:
+            Path to JSON file that contains credentials for authentication.
+        :param service_account:
+            Whether the credentials are for a service account or not.
         :param kwargs:
             Passed to parent
         """
@@ -77,15 +81,17 @@ class GoogleDriveFileSystem(AbstractFileSystem):
         self.scopes = [scope_dict[access]]
         self.token = token
         self.spaces = spaces
+        self.service_account = service_account
         self.root_file_id = root_file_id or 'root'
         self.creds = creds
-        self.connect(method=token)
+        self.connect(method=token, tokens_file=tokens_file)
+        self.ls("")
 
-    def connect(self, method=None):
+    def connect(self, method=None, tokens_file=None):
         if method == 'browser':
             cred = self._connect_browser()
         elif method == "cache":
-            cred = self._connect_cache()
+            cred = self._connect_cache(tokens_file)
         elif method == 'anon':
             cred = AnonymousCredentials()
         elif method is "service_account":
@@ -103,15 +109,26 @@ class GoogleDriveFileSystem(AbstractFileSystem):
             pass
         return self._connect_cache()
 
-    def _connect_cache(self):
-        return pydata_google_auth.get_user_credentials(
-            self.scopes, use_local_webserver=True
+    def _connect_cache(self, tokens_file=None):
+        if self.service_account:
+            if tokens_file is None:
+                raise ValueError("Can't use service accounts without tokens_file")
+            return pydata_google_auth.load_service_account_credentials(
+                tokens_file,
+                scopes=self.scopes
+            )
+        elif tokens_file:
+            return pydata_google_auth.load_user_credentials(tokens_file)
+        else:
+            return pydata_google_auth.get_user_credentials(
+                self.scopes, use_local_webserver=True
         )
-    
+
     def _connect_service_account(self):
         return service_account.Credentials.from_service_account_info(
                                     info=self.creds, 
                                     scopes=self.scopes)
+
     @property
     def drives(self):
         if self._drives is not None:
