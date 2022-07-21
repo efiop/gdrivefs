@@ -8,7 +8,7 @@ from googleapiclient.errors import HttpError
 from google.auth.credentials import AnonymousCredentials
 from google.oauth2 import service_account
 import pydata_google_auth
-
+from pydata_google_auth import cache
 
 scope_dict = {'full_control': 'https://www.googleapis.com/auth/drive',
               'read_only': 'https://www.googleapis.com/auth/drive.readonly'}
@@ -44,7 +44,7 @@ class GoogleDriveFileSystem(AbstractFileSystem):
 
     def __init__(self, root_file_id=None, token="browser",
                  access="full_control", spaces='drive', creds=None,
-                 service_account=False, tokens_file=None, **kwargs):
+                 service_account=False, tokens_file=None, token_json=None, **kwargs):
         """
         Access to dgrive as a file-system
 
@@ -73,6 +73,8 @@ class GoogleDriveFileSystem(AbstractFileSystem):
             Path to JSON file that contains credentials for authentication.
         :param service_account:
             Whether the credentials are for a service account or not.
+        :param token_json:
+            JSON string that contains credentials for authentication.
         :param kwargs:
             Passed to parent
         """
@@ -84,14 +86,18 @@ class GoogleDriveFileSystem(AbstractFileSystem):
         self.service_account = service_account
         self.root_file_id = root_file_id or 'root'
         self.creds = creds
-        self.connect(method=token, tokens_file=tokens_file)
+        self.connect(
+            method=token,
+            tokens_file=tokens_file,
+            token_json=token_json,
+        )
         self.ls("")
 
-    def connect(self, method=None, tokens_file=None):
+    def connect(self, method=None, tokens_file=None, token_json=None):
         if method == 'browser':
             cred = self._connect_browser()
         elif method == "cache":
-            cred = self._connect_cache(tokens_file)
+            cred = self._connect_cache(tokens_file=tokens_file, token_json=token_json)
         elif method == 'anon':
             cred = AnonymousCredentials()
         elif method is "service_account":
@@ -109,14 +115,24 @@ class GoogleDriveFileSystem(AbstractFileSystem):
             pass
         return self._connect_cache()
 
-    def _connect_cache(self, tokens_file=None):
+    def _connect_cache(self, tokens_file=None, token_json=None):
         if self.service_account:
-            if tokens_file is None:
-                raise ValueError("Can't use service accounts without tokens_file")
+            if tokens_file is None and token_json is None:
+                raise ValueError(
+                    "Can't use service accounts without "
+                    "tokens_file or token_json",
+                )
+            if token_json:
+                info = json.loads(token_json)
+                return cache._load_service_account_credentials_from_info(info)
+
             return pydata_google_auth.load_service_account_credentials(
                 tokens_file,
                 scopes=self.scopes
             )
+        elif token_json:
+            info = json.loads(token_json)
+            return cache._load_user_credentials_from_info(info)
         elif tokens_file:
             return pydata_google_auth.load_user_credentials(tokens_file)
         else:
